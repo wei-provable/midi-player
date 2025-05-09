@@ -17,6 +17,7 @@ export default function MidiPlayer() {
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [tracks, setTracks] = useState<Track[]>([]);
+  const [currentFile, setCurrentFile] = useState<string | null>(null);
   const synthRef = useRef<any>(null);
   const sequencerRef = useRef<any>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -65,6 +66,145 @@ export default function MidiPlayer() {
         audioContextRef.current.close();
       }
     };
+  }, []);
+
+  // Function to load a random MIDI file
+  const loadRandomMidiFile = async () => {
+    try {
+      setIsLoading(true);
+      setError(null);
+
+      // Fetch the list of MIDI files
+      const response = await fetch('/api/midi-files');
+      const files = await response.json();
+      
+      if (!files.length) {
+        throw new Error('No MIDI files found in the MIDIs folder');
+      }
+
+      // Select a random file
+      const randomFile = files[Math.floor(Math.random() * files.length)];
+      console.log('Loading MIDI file:', randomFile);
+      setCurrentFile(randomFile);
+
+      // Fetch the MIDI file
+      const midiResponse = await fetch(`/MIDIs/${randomFile}`);
+      const arrayBuffer = await midiResponse.arrayBuffer();
+      
+      // Create a new sequencer with the MIDI file
+      if (sequencerRef.current) {
+        console.log('Stopping previous sequencer...');
+        sequencerRef.current.stop();
+      }
+      
+      console.log('Creating new sequencer...');
+      sequencerRef.current = new Sequencer([{ binary: arrayBuffer }], synthRef.current, {
+        skipToFirstNoteOn: true,
+        autoPlay: false,
+        preservePlaybackState: true
+      });
+
+      // Wait for MIDI data to be loaded
+      let attempts = 0;
+      const maxAttempts = 50; // 5 seconds total
+      const checkDuration = () => {
+        if (sequencerRef.current && sequencerRef.current.duration !== 99999) {
+          console.log('MIDI data loaded, duration:', sequencerRef.current.duration);
+          setDuration(sequencerRef.current.duration);
+          setIsPlaying(false);
+          setIsLoading(false);
+
+          // Initialize tracks
+          const midiData = sequencerRef.current.midiData;
+          console.log('MIDI Data:', midiData);
+          console.log('Track Names:', midiData.trackNames);
+          console.log('Tracks:', midiData.tracks);
+          
+          const newTracks: Track[] = [];
+          let firstUnmutedTrack = -1; // Track which track should be unmuted first
+
+          // First pass: create all tracks and find the highest priority track
+          for (let i = 0; i < midiData.tracksAmount; i++) {
+            // Get track name from metadata if available
+            let trackName = `Track ${i}`;
+            
+            // Check for track name in different possible locations
+            if (midiData.trackNames && midiData.trackNames[i + 1]) {
+              trackName = midiData.trackNames[i + 1];
+            } else if (midiData.tracks && midiData.tracks[i + 1]) {
+              const track = midiData.tracks[i + 1];
+              if (track.name) {
+                trackName = track.name;
+              }
+            }
+
+            // If the track name is empty or just whitespace, use a default name
+            if (!trackName || trackName.trim() === '') {
+              trackName = `Track ${i}`;
+            }
+
+            // Determine track priority for unmuting
+            let priority = 2; // Default priority (other instruments)
+            const lowerName = trackName.toLowerCase();
+            if (lowerName.includes('percussion')) {
+              priority = 0; // Highest priority - percussion first
+            } else if (lowerName.includes('bass')) {
+              priority = 1; // Second priority - bass
+            } else if (lowerName.includes('lead')) {
+              priority = 3; // Fourth priority - lead
+            } else if (lowerName.includes('voice')) {
+              priority = 4; // Fifth priority - voice
+            } else if (lowerName.includes('melody')) {
+              priority = 5; // Lowest priority - melody
+            }
+            // Other instruments remain at priority 2
+
+            // Find the first track to unmute (highest priority)
+            if (firstUnmutedTrack === -1 || priority < newTracks[firstUnmutedTrack].priority) {
+              firstUnmutedTrack = i;
+            }
+
+            // Create track and set initial mute state (all muted initially)
+            const track = {
+              id: i,
+              name: trackName,
+              isMuted: true, // All tracks start muted
+              priority
+            };
+            newTracks.push(track);
+          }
+
+          // Second pass: set mute states in synthesizer
+          console.log('Setting initial mute states. First unmuted track:', firstUnmutedTrack);
+          for (let i = 0; i < newTracks.length; i++) {
+            const shouldMute = i !== firstUnmutedTrack;
+            console.log(`Track ${i} (${newTracks[i].name}): shouldMute = ${shouldMute}`);
+            newTracks[i].isMuted = shouldMute;
+            synthRef.current.muteChannel(i, shouldMute);
+          }
+
+          console.log('Initialized Tracks:', newTracks);
+          setTracks(newTracks);
+        } else if (attempts < maxAttempts) {
+          attempts++;
+          setTimeout(checkDuration, 100);
+        } else {
+          console.error('Failed to load MIDI data');
+          setError('Failed to load MIDI data');
+          setIsLoading(false);
+        }
+      };
+      checkDuration();
+    } catch (error) {
+      console.error('Error loading MIDI file:', error);
+      setError(error instanceof Error ? error.message : 'Error loading MIDI file');
+      setIsLoading(false);
+    }
+  };
+
+  // Load a random MIDI file when the component mounts
+  useEffect(() => {
+    loadRandomMidiFile();
   }, []);
 
   const handleFileChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -212,9 +352,34 @@ export default function MidiPlayer() {
   };
 
   const handleTimeUpdate = () => {
-    if (!sequencerRef.current) return;
-    setCurrentTime(sequencerRef.current.currentTime);
+    try {
+      if (!sequencerRef.current?.midiData) {
+        setCurrentTime(0);
+        return;
+      }
+      const time = sequencerRef.current.currentTime;
+      if (typeof time === 'number' && !isNaN(time)) {
+        setCurrentTime(time);
+      }
+    } catch (error) {
+      console.error('Error updating time:', error);
+      setCurrentTime(0);
+    }
   };
+
+  useEffect(() => {
+    let intervalId: NodeJS.Timeout | null = null;
+    
+    if (sequencerRef.current?.midiData) {
+      intervalId = setInterval(handleTimeUpdate, 100);
+    }
+
+    return () => {
+      if (intervalId) {
+        clearInterval(intervalId);
+      }
+    };
+  }, [sequencerRef.current?.midiData]);
 
   const toggleMute = (trackId: number) => {
     if (!synthRef.current) return;
@@ -304,11 +469,6 @@ export default function MidiPlayer() {
     });
   };
 
-  useEffect(() => {
-    const interval = setInterval(handleTimeUpdate, 100);
-    return () => clearInterval(interval);
-  }, []);
-
   return (
     <div className="space-y-4">
       <div className="flex items-center space-x-4">
@@ -325,6 +485,13 @@ export default function MidiPlayer() {
           disabled={isLoading}
         >
           {isLoading ? 'Loading...' : 'Select MIDI File'}
+        </button>
+        <button
+          onClick={loadRandomMidiFile}
+          className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600"
+          disabled={isLoading}
+        >
+          {isLoading ? 'Loading...' : 'Load Random MIDI'}
         </button>
         <button
           onClick={togglePlay}
@@ -352,6 +519,12 @@ export default function MidiPlayer() {
       {error && (
         <div className="text-red-500 text-sm">
           {error}
+        </div>
+      )}
+      
+      {currentFile && (
+        <div className="text-sm text-gray-600">
+          Current file: {currentFile}
         </div>
       )}
       
