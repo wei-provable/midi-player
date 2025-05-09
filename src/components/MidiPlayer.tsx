@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { Synthetizer, Sequencer } from 'spessasynth_lib';
+import Fuse from 'fuse.js';
 
 interface Track {
   id: number;
@@ -9,6 +10,72 @@ interface Track {
   isMuted: boolean;
   priority: number;
 }
+
+// Common game name variations
+const gameNameVariations: { [key: string]: string[] } = {
+  'mario': ['super mario', 'super mario bros', 'mario bros', 'mario brothers'],
+  'zelda': ['legend of zelda', 'zelda', 'the legend of zelda'],
+  'metroid': ['metroid', 'metroid prime'],
+  'pokemon': ['pokemon', 'pokémon', 'pocket monsters'],
+  'sonic': ['sonic the hedgehog', 'sonic', 'sonic hedgehog'],
+  'final fantasy': ['final fantasy', 'ff'],
+  'street fighter': ['street fighter', 'sf'],
+  'mortal kombat': ['mortal kombat', 'mk'],
+  'donkey kong': ['donkey kong', 'dk'],
+  'castlevania': ['castlevania', 'vampire killer'],
+  'megaman': ['megaman', 'mega man', 'rockman'],
+  'contra': ['contra', 'probotector'],
+  'tetris': ['tetris', 'tetris classic'],
+  'pacman': ['pacman', 'pac-man', 'pac man'],
+  'space invaders': ['space invaders', 'spaceinvaders'],
+  'galaga': ['galaga', 'galaxian'],
+  'frogger': ['frogger', 'frog'],
+  'dig dug': ['dig dug', 'digdug'],
+  'qbert': ['qbert', 'q-bert', 'q bert'],
+  'bubble bobble': ['bubble bobble', 'bubblebobble'],
+};
+
+// Function to get all variations of a game name
+const getGameVariations = (gameName: string): string[] => {
+  const lowerName = gameName.toLowerCase();
+  const variations = new Set<string>([lowerName]);
+  
+  // Add known variations
+  Object.entries(gameNameVariations).forEach(([key, variants]) => {
+    if (lowerName.includes(key)) {
+      variants.forEach(variant => variations.add(variant));
+    }
+  });
+  
+  // Add common transformations
+  variations.add(lowerName.replace(/[^a-z0-9]/g, '')); // Remove special characters
+  variations.add(lowerName.replace(/\s+/g, '')); // Remove spaces
+  variations.add(lowerName.replace(/\s+/g, '-')); // Replace spaces with hyphens
+  
+  // Add more variations
+  const words = lowerName.split(/\s+/);
+  if (words.length > 1) {
+    // Add variations with different word orders
+    variations.add(words.reverse().join(' '));
+    variations.add(words.join(''));
+    variations.add(words.join('-'));
+  }
+  
+  // Add common abbreviations
+  if (lowerName.includes('super')) variations.add(lowerName.replace('super', 's'));
+  if (lowerName.includes('mario')) variations.add('mario');
+  if (lowerName.includes('bros')) variations.add(lowerName.replace('bros', 'brothers'));
+  if (lowerName.includes('brothers')) variations.add(lowerName.replace('brothers', 'bros'));
+  
+  // Add partial matches
+  words.forEach(word => {
+    if (word.length > 3) {
+      variations.add(word);
+    }
+  });
+  
+  return Array.from(variations);
+};
 
 export default function MidiPlayer() {
   const [isPlaying, setIsPlaying] = useState(false);
@@ -19,6 +86,9 @@ export default function MidiPlayer() {
   const [tracks, setTracks] = useState<Track[]>([]);
   const [currentFile, setCurrentFile] = useState<string | null>(null);
   const [tokenBalance, setTokenBalance] = useState(5);
+  const [prize, setPrize] = useState(10);
+  const [gameName, setGameName] = useState('');
+  const [gameResult, setGameResult] = useState<string | null>(null);
   const synthRef = useRef<any>(null);
   const sequencerRef = useRef<any>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -669,7 +739,9 @@ export default function MidiPlayer() {
     console.log('Handling More Instruments click');
     // Reduce token balance by 1 first, before unmuting any tracks
     setTokenBalance(prev => Math.max(0, prev - 1));
-    console.log('Token balance reduced by 1');
+    // Reduce prize by 2
+    setPrize(prev => Math.max(0, prev - 2));
+    console.log('Token balance reduced by 1, Prize reduced by 2');
 
     setTracks(prevTracks => {
       const newTracks = [...prevTracks];
@@ -696,6 +768,44 @@ export default function MidiPlayer() {
 
       return newTracks;
     });
+  };
+
+  const handleGameSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!gameName.trim() || !currentFile) return;
+    
+    // Get the MIDI filename without extension and clean it
+    const midiName = currentFile.replace(/\.midi?$/i, '').toLowerCase();
+    const inputName = gameName.trim().toLowerCase();
+    
+    // Get all variations of the input name
+    const inputVariations = getGameVariations(inputName);
+    
+    // Configure Fuse for fuzzy matching with more lenient settings
+    const fuse = new Fuse(inputVariations, {
+      includeScore: true,
+      threshold: 0.6, // More lenient threshold
+      keys: ['name'],
+      minMatchCharLength: 2, // Allow shorter matches
+      location: 0,
+      distance: 100, // Allow more distance between characters
+      ignoreLocation: true, // Don't care about where the match occurs
+      useExtendedSearch: true
+    });
+    
+    // Check if any variation matches the MIDI filename
+    const results = fuse.search(midiName);
+    const bestMatch = results[0];
+    
+    // More lenient matching threshold
+    const isSimilar = bestMatch && bestMatch.score && bestMatch.score < 0.8;
+    
+    setGameResult(isSimilar ? "YOU WON! 🎉" : "YOU LOST :(");
+    console.log('Game name submitted:', gameName);
+    console.log('MIDI file:', midiName);
+    console.log('Input variations:', inputVariations);
+    console.log('Best match score:', bestMatch?.score);
+    console.log('Result:', isSimilar ? 'Win' : 'Loss');
   };
 
   return (
@@ -751,6 +861,44 @@ export default function MidiPlayer() {
           <h3 className="text-lg font-semibold text-gray-800">Token Balance</h3>
           <div className="text-2xl font-bold text-blue-600">{tokenBalance}</div>
         </div>
+      </div>
+
+      {/* Prize Panel */}
+      <div className="bg-white p-4 rounded-lg shadow-md">
+        <div className="flex items-center justify-between">
+          <h3 className="text-lg font-semibold text-gray-800">Prize</h3>
+          <div className="text-2xl font-bold text-green-600">{prize}</div>
+        </div>
+      </div>
+
+      {/* Game Name Input */}
+      <div className="bg-white p-4 rounded-lg shadow-md">
+        <form onSubmit={handleGameSubmit} className="flex flex-col space-y-2">
+          <label htmlFor="gameName" className="text-lg font-semibold text-gray-800">
+            Which retro game?
+          </label>
+          <div className="flex space-x-2">
+            <input
+              type="text"
+              id="gameName"
+              value={gameName}
+              onChange={(e) => setGameName(e.target.value)}
+              placeholder="Enter retro game name..."
+              className="flex-1 px-4 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+            />
+            <button
+              type="submit"
+              className="px-6 py-2 bg-blue-500 text-white rounded-md hover:bg-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
+            >
+              Submit
+            </button>
+          </div>
+          {gameResult && (
+            <div className={`mt-2 text-lg font-bold ${gameResult.includes('WON') ? 'text-green-600' : 'text-red-600'}`}>
+              {gameResult}
+            </div>
+          )}
+        </form>
       </div>
       
       {error && (
