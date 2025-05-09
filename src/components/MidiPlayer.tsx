@@ -3,12 +3,19 @@
 import { useEffect, useRef, useState } from 'react';
 import { Synthetizer, Sequencer } from 'spessasynth_lib';
 
+interface Track {
+  id: number;
+  name: string;
+  isMuted: boolean;
+}
+
 export default function MidiPlayer() {
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [tracks, setTracks] = useState<Track[]>([]);
   const synthRef = useRef<any>(null);
   const sequencerRef = useRef<any>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -91,6 +98,26 @@ export default function MidiPlayer() {
           setDuration(sequencerRef.current.duration);
           setIsPlaying(false);
           setIsLoading(false);
+
+          // Initialize tracks
+          const midiData = sequencerRef.current.midiData;
+          const newTracks: Track[] = [];
+          for (let i = 0; i < midiData.tracksAmount; i++) {
+            // Get track name from metadata if available
+            let trackName = `Track ${i + 1}`;
+            if (midiData.tracks && midiData.tracks[i]) {
+              const track = midiData.tracks[i];
+              if (track.name) {
+                trackName = track.name;
+              }
+            }
+            newTracks.push({
+              id: i,
+              name: trackName,
+              isMuted: false
+            });
+          }
+          setTracks(newTracks);
         } else if (attempts < maxAttempts) {
           attempts++;
           setTimeout(checkDuration, 100);
@@ -136,6 +163,40 @@ export default function MidiPlayer() {
     setCurrentTime(sequencerRef.current.currentTime);
   };
 
+  const toggleMute = (trackId: number) => {
+    if (!synthRef.current) return;
+
+    setTracks(prevTracks => {
+      const newTracks = prevTracks.map(track => {
+        if (track.id === trackId) {
+          const newMutedState = !track.isMuted;
+          // Mute/unmute the channel
+          synthRef.current.muteChannel(trackId, newMutedState);
+          return { ...track, isMuted: newMutedState };
+        }
+        return track;
+      });
+      return newTracks;
+    });
+  };
+
+  const handleRestart = () => {
+    if (!sequencerRef.current) return;
+
+    try {
+      // Stop current playback
+      sequencerRef.current.stop();
+      // Reset to beginning
+      sequencerRef.current.currentTime = 0;
+      // Start playing
+      sequencerRef.current.play();
+      setIsPlaying(true);
+    } catch (error) {
+      console.error('Error restarting playback:', error);
+      setError(error instanceof Error ? error.message : 'Error restarting playback');
+    }
+  };
+
   useEffect(() => {
     const interval = setInterval(handleTimeUpdate, 100);
     return () => clearInterval(interval);
@@ -165,6 +226,13 @@ export default function MidiPlayer() {
         >
           {isPlaying ? 'Pause' : 'Play'}
         </button>
+        <button
+          onClick={handleRestart}
+          className="px-4 py-2 bg-purple-500 text-white rounded hover:bg-purple-600"
+          disabled={!sequencerRef.current || isLoading}
+        >
+          Restart
+        </button>
       </div>
       
       {error && (
@@ -185,6 +253,28 @@ export default function MidiPlayer() {
       <div className="text-sm text-gray-600">
         {Math.floor(currentTime)}s / {Math.floor(duration)}s
       </div>
+
+      {/* Track Controls */}
+      {tracks.length > 0 && (
+        <div className="mt-4 space-y-2">
+          <h3 className="text-lg font-semibold">Tracks</h3>
+          <div className="space-y-2">
+            {tracks.map((track) => (
+              <div key={track.id} className="flex items-center space-x-4 p-2 bg-gray-100 rounded">
+                <span className="flex-1">{track.name}</span>
+                <button
+                  onClick={() => toggleMute(track.id)}
+                  className={`px-3 py-1 rounded ${
+                    track.isMuted ? 'bg-red-500 text-white' : 'bg-gray-300'
+                  }`}
+                >
+                  Mute
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 } 
