@@ -18,6 +18,7 @@ export default function MidiPlayer() {
   const [isLoading, setIsLoading] = useState(false);
   const [tracks, setTracks] = useState<Track[]>([]);
   const [currentFile, setCurrentFile] = useState<string | null>(null);
+  const [tokenBalance, setTokenBalance] = useState(5);
   const synthRef = useRef<any>(null);
   const sequencerRef = useRef<any>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -663,9 +664,13 @@ export default function MidiPlayer() {
   };
 
   const handleMoreInstruments = () => {
-    if (!synthRef.current) return;
+    if (!synthRef.current || tokenBalance <= 0) return;  // Add token balance check
 
     console.log('Handling More Instruments click');
+    // Reduce token balance by 1 first, before unmuting any tracks
+    setTokenBalance(prev => Math.max(0, prev - 1));
+    console.log('Token balance reduced by 1');
+
     setTracks(prevTracks => {
       const newTracks = [...prevTracks];
       
@@ -685,6 +690,8 @@ export default function MidiPlayer() {
         // Unmute only one track
         newTracks[nextTrackToUnmute.originalIndex].isMuted = false;
         synthRef.current.muteChannel(nextTrackToUnmute.id, false);
+      } else {
+        console.log('No more tracks to unmute');
       }
 
       return newTracks;
@@ -729,13 +736,21 @@ export default function MidiPlayer() {
         >
           Restart
         </button>
-          <button
+        <button
           onClick={handleMoreInstruments}
-          className="px-4 py-2 bg-orange-500 text-white rounded hover:bg-orange-600"
-          disabled={!sequencerRef.current || isLoading}
-          >
+          className="px-4 py-2 bg-orange-500 text-white rounded hover:bg-orange-600 disabled:bg-gray-400 disabled:cursor-not-allowed"
+          disabled={!sequencerRef.current || isLoading || tokenBalance <= 0}
+        >
           More Instruments
-          </button>
+        </button>
+      </div>
+      
+      {/* Token Balance Panel */}
+      <div className="bg-white p-4 rounded-lg shadow-md">
+        <div className="flex items-center justify-between">
+          <h3 className="text-lg font-semibold text-gray-800">Token Balance</h3>
+          <div className="text-2xl font-bold text-blue-600">{tokenBalance}</div>
+        </div>
       </div>
       
       {error && (
