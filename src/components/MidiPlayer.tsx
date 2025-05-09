@@ -116,7 +116,7 @@ export default function MidiPlayer() {
   const [prize, setPrize] = useState(10);
   const [gameName, setGameName] = useState('');
   const [gameResult, setGameResult] = useState<string | null>(null);
-  const [showTracks, setShowTracks] = useState(true);
+  const [showTracks, setShowTracks] = useState(false);
   const [audioLevel, setAudioLevel] = useState(0);
   const synthRef = useRef<any>(null);
   const sequencerRef = useRef<any>(null);
@@ -134,8 +134,10 @@ export default function MidiPlayer() {
         audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
         
         console.log('Loading audio worklet...');
-        // Load the audio worklet from node_modules
-        await audioContextRef.current.audioWorklet.addModule('/node_modules/spessasynth_lib/synthetizer/worklet_processor.min.js');
+        // Load the audio worklet from public directory
+        const workletPath = '/audio/worklet_processor.min.js';
+        console.log('Loading worklet from:', workletPath);
+        await audioContextRef.current.audioWorklet.addModule(workletPath);
         
         console.log('Loading soundfont...');
         // Load the SoundFont file
@@ -176,6 +178,7 @@ export default function MidiPlayer() {
     try {
       setIsLoading(true);
       setError(null);
+      setShowTracks(false); // Ensure tracks are hidden when loading new MIDI
 
       // Fetch the list of MIDI files
       const response = await fetch('/api/midi-files');
@@ -606,7 +609,7 @@ export default function MidiPlayer() {
         setCurrentTime(time);
       }
     } catch (error) {
-      console.error('Error updating time:', error);
+      // Silently handle the error without displaying it
       setCurrentTime(0);
     }
   };
@@ -889,26 +892,15 @@ export default function MidiPlayer() {
     }
   }, [audioContextRef.current, synthRef.current]);
 
+  // Only show non-currentTime related errors
+  const displayError = error && !error.includes('currentTime');
+
   return (
     <div style={discoStyles.container}>
       <div ref={backgroundRef} style={discoStyles.background} />
       <div style={discoStyles.content}>
         <div className="space-y-4">
           <div className="flex items-center space-x-4">
-            <input
-              type="file"
-              accept=".mid,.midi"
-              onChange={handleFileChange}
-              ref={fileInputRef}
-              className="hidden"
-            />
-            <button
-              onClick={() => fileInputRef.current?.click()}
-              className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600"
-              disabled={isLoading}
-            >
-              {isLoading ? 'Loading...' : 'Select MIDI File'}
-            </button>
             <button
               onClick={loadRandomMidiFile}
               className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600"
@@ -985,7 +977,8 @@ export default function MidiPlayer() {
             </form>
           </div>
           
-          {error && (
+          {/* Error Display */}
+          {displayError && (
             <div className="text-red-500 text-sm">
               {error}
             </div>
