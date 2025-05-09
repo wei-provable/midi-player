@@ -77,6 +77,33 @@ const getGameVariations = (gameName: string): string[] => {
   return Array.from(variations);
 };
 
+// Add styles for the disco background
+const discoStyles = {
+  container: {
+    position: 'relative' as const,
+    minHeight: '100vh',
+    overflow: 'hidden',
+  },
+  background: {
+    position: 'fixed' as const,
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    zIndex: -1,
+    transition: 'background-color 0.1s ease',
+  },
+  content: {
+    position: 'relative' as const,
+    zIndex: 1,
+    backgroundColor: 'rgba(255, 255, 255, 0.9)',
+    borderRadius: '1rem',
+    padding: '2rem',
+    margin: '2rem',
+    boxShadow: '0 4px 6px rgba(0, 0, 0, 0.1)',
+  }
+};
+
 export default function MidiPlayer() {
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
@@ -89,10 +116,15 @@ export default function MidiPlayer() {
   const [prize, setPrize] = useState(10);
   const [gameName, setGameName] = useState('');
   const [gameResult, setGameResult] = useState<string | null>(null);
+  const [showTracks, setShowTracks] = useState(true);
+  const [audioLevel, setAudioLevel] = useState(0);
   const synthRef = useRef<any>(null);
   const sequencerRef = useRef<any>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
+  const analyserRef = useRef<AnalyserNode | null>(null);
+  const animationFrameRef = useRef<number>();
+  const backgroundRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const initAudio = async () => {
@@ -808,191 +840,251 @@ export default function MidiPlayer() {
     console.log('Result:', isSimilar ? 'Win' : 'Loss');
   };
 
-  return (
-    <div className="space-y-4">
-      <div className="flex items-center space-x-4">
-        <input
-          type="file"
-          accept=".mid,.midi"
-          onChange={handleFileChange}
-          ref={fileInputRef}
-          className="hidden"
-        />
-        <button
-          onClick={() => fileInputRef.current?.click()}
-          className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600"
-          disabled={isLoading}
-        >
-          {isLoading ? 'Loading...' : 'Select MIDI File'}
-        </button>
-        <button
-          onClick={loadRandomMidiFile}
-          className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600"
-          disabled={isLoading}
-        >
-          {isLoading ? 'Loading...' : 'Load Random MIDI'}
-        </button>
-        <button
-          onClick={togglePlay}
-          className="px-4 py-2 bg-green-500 text-white rounded hover:bg-green-600"
-          disabled={!sequencerRef.current || isLoading}
-        >
-          {isPlaying ? 'Pause' : 'Play'}
-        </button>
-        <button
-          onClick={handleRestart}
-          className="px-4 py-2 bg-purple-500 text-white rounded hover:bg-purple-600"
-          disabled={!sequencerRef.current || isLoading}
-        >
-          Restart
-        </button>
-        <button
-          onClick={handleMoreInstruments}
-          className="px-4 py-2 bg-orange-500 text-white rounded hover:bg-orange-600 disabled:bg-gray-400 disabled:cursor-not-allowed"
-          disabled={!sequencerRef.current || isLoading || tokenBalance <= 0}
-        >
-          More Instruments
-        </button>
-      </div>
+  // Function to create disco colors based on audio level
+  const getDiscoColor = (level: number) => {
+    const hue = (Date.now() / 20) % 360; // Rotate through hues
+    const saturation = 100;
+    const lightness = 50 + (level * 20); // Vary lightness with audio level
+    return `hsl(${hue}, ${saturation}%, ${lightness}%)`;
+  };
+
+  // Function to analyze audio and update background
+  const analyzeAudio = () => {
+    if (!analyserRef.current || !backgroundRef.current) return;
+
+    const dataArray = new Uint8Array(analyserRef.current.frequencyBinCount);
+    analyserRef.current.getByteFrequencyData(dataArray);
+
+    // Calculate average audio level
+    const average = dataArray.reduce((a, b) => a + b) / dataArray.length;
+    const normalizedLevel = average / 255; // Normalize to 0-1
+    setAudioLevel(normalizedLevel);
+
+    // Update background color
+    backgroundRef.current.style.backgroundColor = getDiscoColor(normalizedLevel);
+
+    // Continue animation
+    animationFrameRef.current = requestAnimationFrame(analyzeAudio);
+  };
+
+  // Set up audio analysis when audio context is initialized
+  useEffect(() => {
+    if (audioContextRef.current && synthRef.current) {
+      // Create analyzer node
+      analyserRef.current = audioContextRef.current.createAnalyser();
+      analyserRef.current.fftSize = 256;
       
-      {/* Token Balance Panel */}
-      <div className="bg-white p-4 rounded-lg shadow-md">
-        <div className="flex items-center justify-between">
-          <h3 className="text-lg font-semibold text-gray-800">Token Balance</h3>
-          <div className="text-2xl font-bold text-blue-600">{tokenBalance}</div>
-        </div>
-      </div>
+      // Connect synthesizer to analyzer
+      synthRef.current.worklet.connect(analyserRef.current);
+      analyserRef.current.connect(audioContextRef.current.destination);
 
-      {/* Prize Panel */}
-      <div className="bg-white p-4 rounded-lg shadow-md">
-        <div className="flex items-center justify-between">
-          <h3 className="text-lg font-semibold text-gray-800">Prize</h3>
-          <div className="text-2xl font-bold text-green-600">{prize}</div>
-        </div>
-      </div>
+      // Start analysis
+      analyzeAudio();
 
-      {/* Game Name Input */}
-      <div className="bg-white p-4 rounded-lg shadow-md">
-        <form onSubmit={handleGameSubmit} className="flex flex-col space-y-2">
-          <label htmlFor="gameName" className="text-lg font-semibold text-gray-800">
-            Which retro game?
-          </label>
-          <div className="flex space-x-2">
+      return () => {
+        if (animationFrameRef.current) {
+          cancelAnimationFrame(animationFrameRef.current);
+        }
+      };
+    }
+  }, [audioContextRef.current, synthRef.current]);
+
+  return (
+    <div style={discoStyles.container}>
+      <div ref={backgroundRef} style={discoStyles.background} />
+      <div style={discoStyles.content}>
+        <div className="space-y-4">
+          <div className="flex items-center space-x-4">
             <input
-              type="text"
-              id="gameName"
-              value={gameName}
-              onChange={(e) => setGameName(e.target.value)}
-              placeholder="Enter retro game name..."
-              className="flex-1 px-4 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              type="file"
+              accept=".mid,.midi"
+              onChange={handleFileChange}
+              ref={fileInputRef}
+              className="hidden"
             />
             <button
-              type="submit"
-              className="px-6 py-2 bg-blue-500 text-white rounded-md hover:bg-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
+              onClick={() => fileInputRef.current?.click()}
+              className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600"
+              disabled={isLoading}
             >
-              Submit
+              {isLoading ? 'Loading...' : 'Select MIDI File'}
+            </button>
+            <button
+              onClick={loadRandomMidiFile}
+              className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600"
+              disabled={isLoading}
+            >
+              {isLoading ? 'Loading...' : 'Load Random MIDI'}
+            </button>
+            <button
+              onClick={togglePlay}
+              className="px-4 py-2 bg-green-500 text-white rounded hover:bg-green-600"
+              disabled={!sequencerRef.current || isLoading}
+            >
+              {isPlaying ? 'Pause' : 'Play'}
+            </button>
+            <button
+              onClick={handleRestart}
+              className="px-4 py-2 bg-purple-500 text-white rounded hover:bg-purple-600"
+              disabled={!sequencerRef.current || isLoading}
+            >
+              Restart
+            </button>
+            <button
+              onClick={handleMoreInstruments}
+              className="px-4 py-2 bg-orange-500 text-white rounded hover:bg-orange-600 disabled:bg-gray-400 disabled:cursor-not-allowed"
+              disabled={!sequencerRef.current || isLoading || tokenBalance <= 0}
+            >
+              More Instruments
             </button>
           </div>
-          {gameResult && (
-            <div className={`mt-2 text-lg font-bold ${gameResult.includes('WON') ? 'text-green-600' : 'text-red-600'}`}>
-              {gameResult}
+          
+          {/* Token Balance Panel */}
+          <div className="bg-white p-4 rounded-lg shadow-md">
+            <div className="flex items-center justify-between">
+              <h3 className="text-lg font-semibold text-gray-800">Token Balance</h3>
+              <div className="text-2xl font-bold text-blue-600">{tokenBalance}</div>
             </div>
-          )}
-        </form>
-      </div>
-      
-      {error && (
-        <div className="text-red-500 text-sm">
-          {error}
-        </div>
-      )}
-      
-      {currentFile && (
-        <div className="text-sm text-gray-600">
-          Current file: {currentFile}
-        </div>
-      )}
-      
-      <div className="w-full bg-gray-200 rounded-full h-2.5">
-        <div
-          className="bg-blue-600 h-2.5 rounded-full"
-          style={{
-            width: `${(currentTime / duration) * 100}%`,
-          }}
-        />
-      </div>
-      
-      <div className="text-sm text-gray-600">
-        {Math.floor(currentTime)}s / {Math.floor(duration)}s
-      </div>
+          </div>
 
-      {/* Track Controls */}
-      {tracks.length > 0 && (
-        <div className="mt-4 space-y-2">
-          <h3 className="text-lg font-semibold">Tracks</h3>
-          <div className="space-y-2 max-h-[400px] overflow-y-auto pr-2">
-            {tracks.map((track) => (
-              <div 
-                key={track.id} 
-                className="flex items-center space-x-4 p-3 bg-gray-100 rounded hover:bg-gray-200 transition-colors"
-              >
-                <div className="flex-1 flex items-center space-x-2">
-                  <span className={`w-6 h-6 flex items-center justify-center rounded-full text-sm font-medium ${
-                    track.priority === 0 ? 'bg-yellow-500 text-white' :
-                    track.priority === 1 ? 'bg-green-500 text-white' :
-                    track.priority === 2 ? 'bg-blue-500 text-white' :
-                    track.priority === 3 ? 'bg-purple-500 text-white' :
-                    track.priority === 4 ? 'bg-pink-500 text-white' :
-                    'bg-gray-500 text-white'
-                  }`}>
-                    {track.priority + 1}
-                  </span>
-                  <span className="font-medium text-gray-800">{track.name}</span>
-                </div>
+          {/* Prize Panel */}
+          <div className="bg-white p-4 rounded-lg shadow-md">
+            <div className="flex items-center justify-between">
+              <h3 className="text-lg font-semibold text-gray-800">Prize</h3>
+              <div className="text-2xl font-bold text-green-600">{prize}</div>
+            </div>
+          </div>
+
+          {/* Game Name Input */}
+          <div className="bg-white p-4 rounded-lg shadow-md">
+            <form onSubmit={handleGameSubmit} className="flex flex-col space-y-2">
+              <label htmlFor="gameName" className="text-lg font-semibold text-gray-800">
+                Which retro game?
+              </label>
+              <div className="flex space-x-2">
+                <input
+                  type="text"
+                  id="gameName"
+                  value={gameName}
+                  onChange={(e) => setGameName(e.target.value)}
+                  placeholder="Enter retro game name..."
+                  className="flex-1 px-4 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                />
                 <button
-                  onClick={() => toggleMute(track.id)}
-                  className={`px-4 py-2 rounded transition-colors ${
-                    track.isMuted 
-                      ? 'bg-red-500 hover:bg-red-600 text-white' 
-                      : 'bg-gray-300 hover:bg-gray-400 text-gray-800'
-                  }`}
+                  type="submit"
+                  className="px-6 py-2 bg-blue-500 text-white rounded-md hover:bg-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
                 >
-                  {track.isMuted ? 'Unmute' : 'Mute'}
+                  Submit
                 </button>
               </div>
-            ))}
+              {gameResult && (
+                <div className={`mt-2 text-lg font-bold ${gameResult.includes('WON') ? 'text-green-600' : 'text-red-600'}`}>
+                  {gameResult}
+                </div>
+              )}
+            </form>
           </div>
-          <div className="mt-4 text-sm text-gray-600">
-            <p className="font-medium mb-2">Unmuting Order:</p>
-            <ol className="list-decimal list-inside space-y-1">
-              <li className="flex items-center space-x-2">
-                <span className="w-4 h-4 bg-yellow-500 rounded-full"></span>
-                <span>Percussion</span>
-              </li>
-              <li className="flex items-center space-x-2">
-                <span className="w-4 h-4 bg-green-500 rounded-full"></span>
-                <span>Bass</span>
-              </li>
-              <li className="flex items-center space-x-2">
-                <span className="w-4 h-4 bg-blue-500 rounded-full"></span>
-                <span>Other Instruments</span>
-              </li>
-              <li className="flex items-center space-x-2">
-                <span className="w-4 h-4 bg-purple-500 rounded-full"></span>
-                <span>Guitar</span>
-              </li>
-              <li className="flex items-center space-x-2">
-                <span className="w-4 h-4 bg-pink-500 rounded-full"></span>
-                <span>Lead</span>
-              </li>
-              <li className="flex items-center space-x-2">
-                <span className="w-4 h-4 bg-gray-500 rounded-full"></span>
-                <span>Voice</span>
-              </li>
-            </ol>
+          
+          {error && (
+            <div className="text-red-500 text-sm">
+              {error}
+            </div>
+          )}
+          
+          <div className="w-full bg-gray-200 rounded-full h-2.5">
+            <div
+              className="bg-blue-600 h-2.5 rounded-full"
+              style={{
+                width: `${(currentTime / duration) * 100}%`,
+              }}
+            />
           </div>
+          
+          <div className="text-sm text-gray-600">
+            {Math.floor(currentTime)}s / {Math.floor(duration)}s
+          </div>
+
+          {/* Track Controls */}
+          {tracks.length > 0 && (
+            <div className="mt-4 space-y-2">
+              <div className="flex items-center justify-between">
+                <h3 className="text-lg font-semibold">Tracks</h3>
+                <button
+                  onClick={() => setShowTracks(!showTracks)}
+                  className="px-4 py-2 bg-gray-500 text-white rounded hover:bg-gray-600 transition-colors"
+                >
+                  {showTracks ? 'Hide Tracks' : 'Show Tracks'}
+                </button>
+              </div>
+              {showTracks && (
+                <>
+                  <div className="space-y-2 max-h-[400px] overflow-y-auto pr-2">
+                    {tracks.map((track) => (
+                      <div 
+                        key={track.id} 
+                        className="flex items-center space-x-4 p-3 bg-gray-100 rounded hover:bg-gray-200 transition-colors"
+                      >
+                        <div className="flex-1 flex items-center space-x-2">
+                          <span className={`w-6 h-6 flex items-center justify-center rounded-full text-sm font-medium ${
+                            track.priority === 0 ? 'bg-yellow-500 text-white' :
+                            track.priority === 1 ? 'bg-green-500 text-white' :
+                            track.priority === 2 ? 'bg-blue-500 text-white' :
+                            track.priority === 3 ? 'bg-purple-500 text-white' :
+                            track.priority === 4 ? 'bg-pink-500 text-white' :
+                            'bg-gray-500 text-white'
+                          }`}>
+                            {track.priority + 1}
+                          </span>
+                          <span className="font-medium text-gray-800">{track.name}</span>
+                        </div>
+                        <button
+                          onClick={() => toggleMute(track.id)}
+                          className={`px-4 py-2 rounded transition-colors ${
+                            track.isMuted 
+                              ? 'bg-red-500 hover:bg-red-600 text-white' 
+                              : 'bg-gray-300 hover:bg-gray-400 text-gray-800'
+                          }`}
+                        >
+                          {track.isMuted ? 'Unmute' : 'Mute'}
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                  <div className="mt-4 text-sm text-gray-600">
+                    <p className="font-medium mb-2">Unmuting Order:</p>
+                    <ol className="list-decimal list-inside space-y-1">
+                      <li className="flex items-center space-x-2">
+                        <span className="w-4 h-4 bg-yellow-500 rounded-full"></span>
+                        <span>Percussion</span>
+                      </li>
+                      <li className="flex items-center space-x-2">
+                        <span className="w-4 h-4 bg-green-500 rounded-full"></span>
+                        <span>Bass</span>
+                      </li>
+                      <li className="flex items-center space-x-2">
+                        <span className="w-4 h-4 bg-blue-500 rounded-full"></span>
+                        <span>Other Instruments</span>
+                      </li>
+                      <li className="flex items-center space-x-2">
+                        <span className="w-4 h-4 bg-purple-500 rounded-full"></span>
+                        <span>Guitar</span>
+                      </li>
+                      <li className="flex items-center space-x-2">
+                        <span className="w-4 h-4 bg-pink-500 rounded-full"></span>
+                        <span>Lead</span>
+                      </li>
+                      <li className="flex items-center space-x-2">
+                        <span className="w-4 h-4 bg-gray-500 rounded-full"></span>
+                        <span>Voice</span>
+                      </li>
+                    </ol>
+                  </div>
+                </>
+              )}
+            </div>
+          )}
         </div>
-      )}
+      </div>
     </div>
   );
 } 
