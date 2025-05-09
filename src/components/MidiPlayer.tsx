@@ -107,6 +107,9 @@ export default function MidiPlayer() {
           console.log('Tracks:', midiData.tracks);
           
           const newTracks: Track[] = [];
+          let firstUnmutedTrack = -1; // Track which track should be unmuted first
+
+          // First pass: create all tracks and find the highest priority track
           for (let i = 0; i < midiData.tracksAmount; i++) {
             // Get track name from metadata if available
             let trackName = `Track ${i}`;
@@ -127,35 +130,45 @@ export default function MidiPlayer() {
             }
 
             // Determine track priority for unmuting
-            let priority = 2; // Default priority
+            let priority = 2; // Default priority (other instruments)
             const lowerName = trackName.toLowerCase();
-            if (lowerName.includes('percussion') || lowerName.includes('bass')) {
-              priority = 0; // Highest priority
-            } else if (lowerName.includes('guitar') || lowerName.includes('piano') || 
-                      lowerName.includes('voice') || lowerName.includes('lead')) {
-              priority = 3; // Lowest priority
-            } else {
-              priority = 1; // Medium priority
+            if (lowerName.includes('percussion')) {
+              priority = 0; // Highest priority - percussion first
+            } else if (lowerName.includes('bass')) {
+              priority = 1; // Second priority - bass
+            } else if (lowerName.includes('lead')) {
+              priority = 3; // Fourth priority - lead
+            } else if (lowerName.includes('voice')) {
+              priority = 4; // Fifth priority - voice
+            } else if (lowerName.includes('melody')) {
+              priority = 5; // Lowest priority - melody
+            }
+            // Other instruments remain at priority 2
+
+            // Find the first track to unmute (highest priority)
+            if (firstUnmutedTrack === -1 || priority < newTracks[firstUnmutedTrack].priority) {
+              firstUnmutedTrack = i;
             }
 
-            // Check if track should be muted (if it doesn't contain "percussion" or "bass")
-            const shouldMute = !lowerName.includes('percussion') && 
-                             !lowerName.includes('bass');
-
-            // Create track and set initial mute state
+            // Create track and set initial mute state (all muted initially)
             const track = {
               id: i,
               name: trackName,
-              isMuted: shouldMute,
+              isMuted: true, // All tracks start muted
               priority
             };
             newTracks.push(track);
-
-            // Set initial mute state in synthesizer
-            if (synthRef.current) {
-              synthRef.current.muteChannel(i, shouldMute);
-            }
           }
+
+          // Second pass: set mute states in synthesizer
+          console.log('Setting initial mute states. First unmuted track:', firstUnmutedTrack);
+          for (let i = 0; i < newTracks.length; i++) {
+            const shouldMute = i !== firstUnmutedTrack;
+            console.log(`Track ${i} (${newTracks[i].name}): shouldMute = ${shouldMute}`);
+            newTracks[i].isMuted = shouldMute;
+            synthRef.current.muteChannel(i, shouldMute);
+          }
+
           console.log('Initialized Tracks:', newTracks);
           setTracks(newTracks);
         } else if (attempts < maxAttempts) {
@@ -206,10 +219,12 @@ export default function MidiPlayer() {
   const toggleMute = (trackId: number) => {
     if (!synthRef.current) return;
 
+    console.log('Toggling mute for track:', trackId);
     setTracks(prevTracks => {
       const newTracks = prevTracks.map(track => {
         if (track.id === trackId) {
           const newMutedState = !track.isMuted;
+          console.log(`Setting channel ${trackId} mute state to:`, newMutedState);
           // Mute/unmute the channel
           synthRef.current.muteChannel(trackId, newMutedState);
           return { ...track, isMuted: newMutedState };
@@ -221,13 +236,36 @@ export default function MidiPlayer() {
   };
 
   const handleRestart = () => {
-    if (!sequencerRef.current) return;
+    if (!sequencerRef.current || !synthRef.current) return;
 
     try {
       // Stop current playback
       sequencerRef.current.stop();
       // Reset to beginning
       sequencerRef.current.currentTime = 0;
+
+      // Reset tracks to initial state (only highest priority track unmuted)
+      setTracks(prevTracks => {
+        const newTracks = [...prevTracks];
+        
+        // Find the highest priority track
+        const highestPriorityTrack = newTracks.reduce((highest, track, index) => {
+          if (highest === -1 || track.priority < newTracks[highest].priority) {
+            return index;
+          }
+          return highest;
+        }, -1);
+
+        // Reset all tracks to muted except the highest priority one
+        newTracks.forEach((track, index) => {
+          const shouldMute = index !== highestPriorityTrack;
+          track.isMuted = shouldMute;
+          synthRef.current.muteChannel(track.id, shouldMute);
+        });
+
+        return newTracks;
+      });
+
       // Start playing
       sequencerRef.current.play();
       setIsPlaying(true);
@@ -240,11 +278,10 @@ export default function MidiPlayer() {
   const handleMoreInstruments = () => {
     if (!synthRef.current) return;
 
+    console.log('Handling More Instruments click');
     setTracks(prevTracks => {
       const newTracks = [...prevTracks];
-      let unmutedCount = 0;
-      const maxUnmutePerClick = 2; // Maximum number of tracks to unmute per click
-
+      
       // Sort tracks by priority and current mute state
       const sortedTracks = newTracks
         .map((track, index) => ({ ...track, originalIndex: index }))
@@ -253,13 +290,14 @@ export default function MidiPlayer() {
           return a.priority - b.priority;
         });
 
-      // Unmute tracks based on priority
-      for (const track of sortedTracks) {
-        if (track.isMuted && unmutedCount < maxUnmutePerClick) {
-          newTracks[track.originalIndex].isMuted = false;
-          synthRef.current.muteChannel(track.id, false);
-          unmutedCount++;
-        }
+      // Find the next track to unmute
+      const nextTrackToUnmute = sortedTracks.find(track => track.isMuted);
+      
+      if (nextTrackToUnmute) {
+        console.log('Unmuting track:', nextTrackToUnmute.id);
+        // Unmute only one track
+        newTracks[nextTrackToUnmute.originalIndex].isMuted = false;
+        synthRef.current.muteChannel(nextTrackToUnmute.id, false);
       }
 
       return newTracks;
@@ -340,7 +378,19 @@ export default function MidiPlayer() {
                 key={track.id} 
                 className="flex items-center space-x-4 p-3 bg-gray-100 rounded hover:bg-gray-200 transition-colors"
               >
-                <span className="flex-1 font-medium text-gray-800">{track.name}</span>
+                <div className="flex-1 flex items-center space-x-2">
+                  <span className={`w-6 h-6 flex items-center justify-center rounded-full text-sm font-medium ${
+                    track.priority === 0 ? 'bg-yellow-500 text-white' :
+                    track.priority === 1 ? 'bg-green-500 text-white' :
+                    track.priority === 2 ? 'bg-blue-500 text-white' :
+                    track.priority === 3 ? 'bg-purple-500 text-white' :
+                    track.priority === 4 ? 'bg-pink-500 text-white' :
+                    'bg-gray-500 text-white'
+                  }`}>
+                    {track.priority + 1}
+                  </span>
+                  <span className="font-medium text-gray-800">{track.name}</span>
+                </div>
                 <button
                   onClick={() => toggleMute(track.id)}
                   className={`px-4 py-2 rounded transition-colors ${
@@ -353,6 +403,35 @@ export default function MidiPlayer() {
                 </button>
               </div>
             ))}
+          </div>
+          <div className="mt-4 text-sm text-gray-600">
+            <p className="font-medium mb-2">Unmuting Order:</p>
+            <ol className="list-decimal list-inside space-y-1">
+              <li className="flex items-center space-x-2">
+                <span className="w-4 h-4 bg-yellow-500 rounded-full"></span>
+                <span>Percussion</span>
+              </li>
+              <li className="flex items-center space-x-2">
+                <span className="w-4 h-4 bg-green-500 rounded-full"></span>
+                <span>Bass</span>
+              </li>
+              <li className="flex items-center space-x-2">
+                <span className="w-4 h-4 bg-blue-500 rounded-full"></span>
+                <span>Other Instruments</span>
+              </li>
+              <li className="flex items-center space-x-2">
+                <span className="w-4 h-4 bg-purple-500 rounded-full"></span>
+                <span>Lead</span>
+              </li>
+              <li className="flex items-center space-x-2">
+                <span className="w-4 h-4 bg-pink-500 rounded-full"></span>
+                <span>Voice</span>
+              </li>
+              <li className="flex items-center space-x-2">
+                <span className="w-4 h-4 bg-gray-500 rounded-full"></span>
+                <span>Melody</span>
+              </li>
+            </ol>
           </div>
         </div>
       )}
