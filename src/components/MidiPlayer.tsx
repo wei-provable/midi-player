@@ -101,22 +101,37 @@ export default function MidiPlayer() {
 
           // Initialize tracks
           const midiData = sequencerRef.current.midiData;
+          console.log('MIDI Data:', midiData);
+          console.log('Track Names:', midiData.trackNames);
+          console.log('Tracks:', midiData.tracks);
+          
           const newTracks: Track[] = [];
           for (let i = 0; i < midiData.tracksAmount; i++) {
             // Get track name from metadata if available
-            let trackName = `Track ${i + 1}`;
-            if (midiData.tracks && midiData.tracks[i]) {
-              const track = midiData.tracks[i];
+            let trackName = `Track ${i}`;
+            
+            // Check for track name in different possible locations
+            if (midiData.trackNames && midiData.trackNames[i + 1]) { // Add offset of 1
+              trackName = midiData.trackNames[i + 1];
+            } else if (midiData.tracks && midiData.tracks[i + 1]) { // Add offset of 1
+              const track = midiData.tracks[i + 1];
               if (track.name) {
                 trackName = track.name;
               }
             }
+
+            // If the track name is empty or just whitespace, use a default name
+            if (!trackName || trackName.trim() === '') {
+              trackName = `Track ${i}`;
+            }
+
             newTracks.push({
               id: i,
               name: trackName,
               isMuted: false
             });
           }
+          console.log('Initialized Tracks:', newTracks);
           setTracks(newTracks);
         } else if (attempts < maxAttempts) {
           attempts++;
@@ -258,17 +273,22 @@ export default function MidiPlayer() {
       {tracks.length > 0 && (
         <div className="mt-4 space-y-2">
           <h3 className="text-lg font-semibold">Tracks</h3>
-          <div className="space-y-2">
+          <div className="space-y-2 max-h-[400px] overflow-y-auto pr-2">
             {tracks.map((track) => (
-              <div key={track.id} className="flex items-center space-x-4 p-2 bg-gray-100 rounded">
-                <span className="flex-1">{track.name}</span>
+              <div 
+                key={track.id} 
+                className="flex items-center space-x-4 p-3 bg-gray-100 rounded hover:bg-gray-200 transition-colors"
+              >
+                <span className="flex-1 font-medium text-gray-800">{track.name}</span>
                 <button
                   onClick={() => toggleMute(track.id)}
-                  className={`px-3 py-1 rounded ${
-                    track.isMuted ? 'bg-red-500 text-white' : 'bg-gray-300'
+                  className={`px-4 py-2 rounded transition-colors ${
+                    track.isMuted 
+                      ? 'bg-red-500 hover:bg-red-600 text-white' 
+                      : 'bg-gray-300 hover:bg-gray-400 text-gray-800'
                   }`}
                 >
-                  Mute
+                  {track.isMuted ? 'Unmute' : 'Mute'}
                 </button>
               </div>
             ))}
