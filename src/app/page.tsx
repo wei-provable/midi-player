@@ -11,7 +11,7 @@ const MidiPlayer = dynamic(() => import('@/components/MidiPlayer'), {
 export default function Home() {
   return (
     <main className="min-h-screen p-8">
-      <h1 className="text-3xl font-bold mb-8">MIDI Player</h1>
+      <h1 className="text-3xl font-bold mb-8">Retro Beats</h1>
       <MidiPlayer />
     </main>
   );

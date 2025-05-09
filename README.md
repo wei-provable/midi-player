@@ -1,6 +1,6 @@
-# MIDI Player
+# Retro Beats
 
-A web-based MIDI player built with Next.js and SpessaSynth. This application allows you to play MIDI files in your browser with high-quality sound synthesis.
+A retro-style MIDI player built with Next.js and SpessaSynth. This application allows you to play MIDI files in your browser with high-quality sound synthesis.
 
 ## Features
 

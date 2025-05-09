@@ -5,8 +5,8 @@ import './globals.css';
 const inter = Inter({ subsets: ['latin'] });
 
 export const metadata: Metadata = {
-  title: 'MIDI Player',
-  description: 'A MIDI player built with Next.js and SpessaSynth',
+  title: 'Retro Beats',
+  description: 'A retro-style MIDI player built with Next.js and SpessaSynth',
 };
 
 export default function RootLayout({
