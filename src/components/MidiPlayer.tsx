@@ -902,6 +902,20 @@ export default function MidiPlayer() {
         <div className="space-y-4">
           <div className="flex items-center space-x-4">
             <button
+              onClick={() => document.getElementById('midiFileInput')?.click()}
+              className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600"
+            >
+              Select MIDI File
+            </button>
+            <input
+              type="file"
+              id="midiFileInput"
+              accept=".mid,.midi"
+              onChange={handleFileChange}
+              className="hidden"
+              ref={fileInputRef}
+            />
+            <button
               onClick={loadRandomMidiFile}
               className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600"
               disabled={isLoading}
@@ -1030,7 +1044,7 @@ export default function MidiPlayer() {
                           </span>
                           <span className="font-medium text-gray-800">{track.name}</span>
                         </div>
-                        <button
+          <button
                           onClick={() => toggleMute(track.id)}
                           className={`px-4 py-2 rounded transition-colors ${
                             track.isMuted 
@@ -1039,7 +1053,7 @@ export default function MidiPlayer() {
                           }`}
                         >
                           {track.isMuted ? 'Unmute' : 'Mute'}
-                        </button>
+          </button>
                       </div>
                     ))}
                   </div>
