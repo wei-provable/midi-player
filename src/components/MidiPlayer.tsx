@@ -3,6 +3,8 @@
 import { useEffect, useRef, useState } from 'react';
 import { Synthetizer, Sequencer } from 'spessasynth_lib';
 import Fuse from 'fuse.js';
+import { useWallet } from '@demox-labs/aleo-wallet-adapter-react';
+import { AleoNetworkClient } from '@provablehq/sdk/testnet.js';
 
 interface Track {
   id: number;
@@ -112,7 +114,7 @@ export default function MidiPlayer() {
   const [isLoading, setIsLoading] = useState(false);
   const [tracks, setTracks] = useState<Track[]>([]);
   const [currentFile, setCurrentFile] = useState<string | null>(null);
-  const [tokenBalance, setTokenBalance] = useState(5);
+  const [tokenBalance, setTokenBalance] = useState<number | undefined>(undefined);
   const [prize, setPrize] = useState(10);
   const [gameName, setGameName] = useState('');
   const [gameResult, setGameResult] = useState<string | null>(null);
@@ -125,6 +127,52 @@ export default function MidiPlayer() {
   const analyserRef = useRef<AnalyserNode | null>(null);
   const animationFrameRef = useRef<number>();
   const backgroundRef = useRef<HTMLDivElement>(null);
+  const { publicKey, requestRecords } = useWallet();
+  const [publicBalance, setPublicBalance] = useState<number | undefined>(undefined);
+
+  useEffect(() => {
+    console.log('fetchBalance useEffect called', { publicKey, requestRecords });
+    const fetchBalance = async () => {
+      if (publicKey && requestRecords) {
+        try {
+          const records = await requestRecords('credits.aleo');
+          console.log('Aleo records:', records);
+          let total = 0;
+          for (const record of records) {
+            if (!record.spent && record.microcredits) {
+              total += parseInt(record.microcredits, 10);
+            }
+          }
+          setTokenBalance(total);
+        } catch (err) {
+          setTokenBalance(undefined);
+        }
+      } else {
+        setTokenBalance(undefined);
+      }
+    };
+    fetchBalance();
+  }, [publicKey, requestRecords]);
+
+  useEffect(() => {
+    const fetchPublicBalance = async () => {
+      if (!publicKey) {
+        setPublicBalance(undefined);
+        return;
+      }
+      try {
+        // Connect to the Aleo mainnet (or testnet, adjust as needed)
+        const client = new AleoNetworkClient('https://api.explorer.provable.com/v1'); // testnet endpoint
+        const balance = await client.getPublicBalance(publicKey);
+        console.log('Public balance:', balance);
+        setPublicBalance(Number(balance));
+      } catch (err) {
+        setPublicBalance(undefined);
+        console.error('Failed to fetch public balance:', err);
+      }
+    };
+    fetchPublicBalance();
+  }, [publicKey]);
 
   useEffect(() => {
     const initAudio = async () => {
@@ -769,11 +817,11 @@ export default function MidiPlayer() {
   };
 
   const handleMoreInstruments = () => {
-    if (!synthRef.current || tokenBalance <= 0) return;  // Add token balance check
+    if (!synthRef.current || (tokenBalance ?? 0) <= 0) return;  // Add token balance check
 
     console.log('Handling More Instruments click');
     // Reduce token balance by 1 first, before unmuting any tracks
-    setTokenBalance(prev => Math.max(0, prev - 1));
+    setTokenBalance(prev => Math.max(0, (prev ?? 0) - 1));
     // Reduce prize by 2
     setPrize(prev => Math.max(0, prev - 2));
     console.log('Token balance reduced by 1, Prize reduced by 2');
@@ -851,47 +899,6 @@ export default function MidiPlayer() {
     return `hsl(${hue}, ${saturation}%, ${lightness}%)`;
   };
 
-  // Function to analyze audio and update background
-  const analyzeAudio = () => {
-    if (!analyserRef.current || !backgroundRef.current) return;
-
-    const dataArray = new Uint8Array(analyserRef.current.frequencyBinCount);
-    analyserRef.current.getByteFrequencyData(dataArray);
-
-    // Calculate average audio level
-    const average = dataArray.reduce((a, b) => a + b) / dataArray.length;
-    const normalizedLevel = average / 255; // Normalize to 0-1
-    setAudioLevel(normalizedLevel);
-
-    // Update background color
-    backgroundRef.current.style.backgroundColor = getDiscoColor(normalizedLevel);
-
-    // Continue animation
-    animationFrameRef.current = requestAnimationFrame(analyzeAudio);
-  };
-
-  // Set up audio analysis when audio context is initialized
-  useEffect(() => {
-    if (audioContextRef.current && synthRef.current) {
-      // Create analyzer node
-      analyserRef.current = audioContextRef.current.createAnalyser();
-      analyserRef.current.fftSize = 256;
-      
-      // Connect synthesizer to analyzer
-      synthRef.current.worklet.connect(analyserRef.current);
-      analyserRef.current.connect(audioContextRef.current.destination);
-
-      // Start analysis
-      analyzeAudio();
-
-      return () => {
-        if (animationFrameRef.current) {
-          cancelAnimationFrame(animationFrameRef.current);
-        }
-      };
-    }
-  }, [audioContextRef.current, synthRef.current]);
-
   // Only show non-currentTime related errors
   const displayError = error && !error.includes('currentTime');
 
@@ -900,6 +907,7 @@ export default function MidiPlayer() {
       <div ref={backgroundRef} style={discoStyles.background} />
       <div style={discoStyles.content}>
         <div className="space-y-4">
+          {/* Controls */}
           <div className="flex items-center space-x-4">
             <button
               onClick={loadRandomMidiFile}
@@ -925,20 +933,22 @@ export default function MidiPlayer() {
             <button
               onClick={handleMoreInstruments}
               className="px-4 py-2 bg-orange-500 text-white rounded hover:bg-orange-600 disabled:bg-gray-400 disabled:cursor-not-allowed"
-              disabled={!sequencerRef.current || isLoading || tokenBalance <= 0}
+              disabled={!sequencerRef.current || isLoading || (tokenBalance ?? 0) <= 0}
             >
               More Instruments
             </button>
           </div>
-          
           {/* Token Balance Panel */}
           <div className="bg-white p-4 rounded-lg shadow-md">
             <div className="flex items-center justify-between">
               <h3 className="text-lg font-semibold text-gray-800">Token Balance</h3>
-              <div className="text-2xl font-bold text-blue-600">{tokenBalance}</div>
+              <div className="text-2xl font-bold text-blue-600">
+                {publicBalance === undefined
+                  ? '—'
+                  : (publicBalance / 1_000_000).toLocaleString() + ' credits'}
+              </div>
             </div>
           </div>
-
           {/* Prize Panel */}
           <div className="bg-white p-4 rounded-lg shadow-md">
             <div className="flex items-center justify-between">
@@ -946,7 +956,6 @@ export default function MidiPlayer() {
               <div className="text-2xl font-bold text-green-600">{prize}</div>
             </div>
           </div>
-
           {/* Game Name Input */}
           <div className="bg-white p-4 rounded-lg shadow-md">
             <form onSubmit={handleGameSubmit} className="flex flex-col space-y-2">
@@ -976,27 +985,22 @@ export default function MidiPlayer() {
               )}
             </form>
           </div>
-          
           {/* Error Display */}
           {displayError && (
             <div className="text-red-500 text-sm">
               {error}
             </div>
           )}
-          
+          {/* Progress Bar */}
           <div className="w-full bg-gray-200 rounded-full h-2.5">
             <div
               className="bg-blue-600 h-2.5 rounded-full"
-              style={{
-                width: `${(currentTime / duration) * 100}%`,
-              }}
+              style={{ width: `${(currentTime / duration) * 100}%` }}
             />
           </div>
-          
           <div className="text-sm text-gray-600">
             {Math.floor(currentTime)}s / {Math.floor(duration)}s
           </div>
-
           {/* Track Controls */}
           {tracks.length > 0 && (
             <div className="mt-4 space-y-2">
@@ -1080,4 +1084,4 @@ export default function MidiPlayer() {
       </div>
     </div>
   );
-} 
+}
