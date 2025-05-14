@@ -938,6 +938,27 @@ export default function MidiPlayer() {
   // Only show non-currentTime related errors
   const displayError = error && !error.includes('currentTime');
 
+  const handleUnmuteAll = () => {
+    if (!synthRef.current) return;
+
+    console.log('Unmuting all tracks');
+    setTracks(prevTracks => {
+      const newTracks = prevTracks.map(track => ({
+        ...track,
+        isMuted: false
+      }));
+
+      // Unmute all channels in the synthesizer
+      newTracks.forEach(track => {
+        const channelIndex = track.id - 1;
+        synthRef.current.muteChannel(channelIndex, false);
+        console.log(`Unmuting track ${track.name} (channel ${channelIndex})`);
+      });
+
+      return newTracks;
+    });
+  };
+
   return (
     <div style={discoStyles.container}>
       <div ref={backgroundRef} style={discoStyles.background} />
@@ -984,7 +1005,7 @@ export default function MidiPlayer() {
               className="px-4 py-2 bg-orange-500 text-white rounded hover:bg-orange-600 disabled:bg-gray-400 disabled:cursor-not-allowed"
               disabled={!sequencerRef.current || isLoading || tokenBalance <= 0}
             >
-              More Instruments
+              More Instruments 💰
             </button>
           </div>
           
@@ -1029,6 +1050,14 @@ export default function MidiPlayer() {
               {gameResult && (
                 <div className={`mt-2 text-lg font-bold ${gameResult.includes('WON') ? 'text-green-600' : 'text-red-600'}`}>
                   {gameResult}
+                  {gameResult.includes('WON') && (
+                    <button
+                      onClick={handleUnmuteAll}
+                      className="ml-4 px-4 py-2 bg-green-500 text-white rounded hover:bg-green-600 transition-colors"
+                    >
+                      Unmute All Tracks 🎵
+                    </button>
+                  )}
                 </div>
               )}
             </form>
