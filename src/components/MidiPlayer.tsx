@@ -179,6 +179,12 @@ export default function MidiPlayer() {
       setIsLoading(true);
       setError(null);
       setShowTracks(false); // Ensure tracks are hidden when loading new MIDI
+      
+      // Reset game-related states
+      setTokenBalance(5); // Reset to initial value
+      setPrize(10); // Reset to initial value
+      setGameName(''); // Clear game name input
+      setGameResult(null); // Clear game result
 
       // Fetch the list of MIDI files
       const response = await fetch('/api/midi-files');
@@ -823,32 +829,61 @@ export default function MidiPlayer() {
     
     // Get all variations of the input name
     const inputVariations = getGameVariations(inputName);
-    
-    // Configure Fuse for fuzzy matching with more lenient settings
-    const fuse = new Fuse(inputVariations, {
+    console.log('Input variations:', inputVariations);
+    console.log('MIDI filename:', midiName);
+
+    // First try exact matches
+    const hasExactMatch = inputVariations.some(variation => 
+      midiName.includes(variation) || variation.includes(midiName)
+    );
+
+    if (hasExactMatch) {
+      console.log('Found exact match!');
+      setGameResult("YOU WON! 🎉");
+      return;
+    }
+
+    // Configure Fuse for fuzzy matching
+    const fuse = new Fuse([midiName], {
       includeScore: true,
-      threshold: 0.6, // More lenient threshold
-      keys: ['name'],
-      minMatchCharLength: 2, // Allow shorter matches
-      location: 0,
-      distance: 100, // Allow more distance between characters
-      ignoreLocation: true, // Don't care about where the match occurs
-      useExtendedSearch: true
+      threshold: 0.4, // Lower threshold means stricter matching
+      minMatchCharLength: 2,
+      distance: 50, // Increased to allow for more variations
+      ignoreLocation: true,
     });
     
-    // Check if any variation matches the MIDI filename
-    const results = fuse.search(midiName);
-    const bestMatch = results[0];
+    // Try each variation with fuzzy matching
+    let bestScore = 1;
+    for (const variation of inputVariations) {
+      const result = fuse.search(variation);
+      if (result.length > 0 && result[0].score) {
+        console.log(`Matching '${variation}' against '${midiName}':`, result[0].score);
+        bestScore = Math.min(bestScore, result[0].score);
+      }
+    }
     
-    // More lenient matching threshold
-    const isSimilar = bestMatch && bestMatch.score && bestMatch.score < 0.8;
+    // Also try matching the other way around
+    const fuseReverse = new Fuse(inputVariations, {
+      includeScore: true,
+      threshold: 0.4,
+      minMatchCharLength: 2,
+      distance: 50,
+      ignoreLocation: true,
+    });
     
-    setGameResult(isSimilar ? "YOU WON! 🎉" : "YOU LOST :(");
+    const reverseResults = fuseReverse.search(midiName);
+    if (reverseResults.length > 0 && reverseResults[0].score) {
+      console.log('Reverse match score:', reverseResults[0].score);
+      bestScore = Math.min(bestScore, reverseResults[0].score);
+    }
+
+    console.log('Best match score:', bestScore);
+    const isMatch = bestScore < 0.4;
+    
+    setGameResult(isMatch ? "YOU WON! 🎉" : "YOU LOST :(");
     console.log('Game name submitted:', gameName);
     console.log('MIDI file:', midiName);
-    console.log('Input variations:', inputVariations);
-    console.log('Best match score:', bestMatch?.score);
-    console.log('Result:', isSimilar ? 'Win' : 'Loss');
+    console.log('Result:', isMatch ? 'Win' : 'Loss');
   };
 
   // Function to create disco colors based on audio level
