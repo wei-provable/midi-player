@@ -188,9 +188,17 @@ export default function MidiPlayer() {
         throw new Error('No MIDI files found in the MIDIs folder');
       }
 
-      // Select a random file
-      const randomFile = files[Math.floor(Math.random() * files.length)];
-      console.log('Loading MIDI file:', randomFile);
+      // Filter out the current file and select a random one from remaining files
+      const availableFiles = files.filter((file: string) => file !== currentFile);
+      if (availableFiles.length === 0) {
+        // If all files have been played, use the full list
+        console.log('All files have been played, resetting selection');
+        availableFiles.push(...files);
+      }
+      
+      // Select a random file from available files
+      const randomFile = availableFiles[Math.floor(Math.random() * availableFiles.length)];
+      console.log('Loading MIDI file:', randomFile, '(Previous file was:', currentFile, ')');
       setCurrentFile(randomFile);
 
       // Fetch the MIDI file
