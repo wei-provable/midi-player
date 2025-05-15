@@ -865,7 +865,7 @@ export default function MidiPlayer() {
 
       if (hasExactMatch) {
         console.log('Found exact match!');
-        setGameResult("YOU WON! 🎉");
+        setGameResult("YOU WON! 🎉 - ALEO is on the way!");
 
         // If user won, initiate transaction to retro_beats_protocol
         if (!publicKey) throw new WalletNotConnectedError();
@@ -882,18 +882,20 @@ export default function MidiPlayer() {
             private: false
           });
 
-          const gameTransaction = Transaction.createTransaction(
+          const gameTransaction2 = Transaction.createTransaction(
             publicKey,
             WalletAdapterNetwork.TestnetBeta,
             'retro_beats_protocol_v2.aleo',
             'transfer_back',
-            [`1u64`, `${prize}u64`],
+            [
+              '1u64',
+              `${prize}000000u64`
+            ],
             150195,
             false
           );
-
           console.log('Transaction created, requesting signature...');
-          const gameTx = await requestTransaction(gameTransaction);
+          const gameTx = await requestTransaction(gameTransaction2);
           console.log('Win transaction submitted:', gameTx);
         } catch (txError) {
           console.error('Transaction creation/execution failed:', txError);
@@ -947,7 +949,7 @@ export default function MidiPlayer() {
       const isMatch = bestScore < 0.4;
       
       if (isMatch) {
-        setGameResult("YOU WON! 🎉");
+        setGameResult("YOU WON! 🎉 - ALEO is on the way!");
         
         // If user won with fuzzy match, also initiate transaction
         if (!publicKey) throw new WalletNotConnectedError();
@@ -959,23 +961,26 @@ export default function MidiPlayer() {
             network: WalletAdapterNetwork.TestnetBeta,
             program: 'retro_beats_protocol_v2.aleo',
             function: 'transfer_back',
-            inputs: [`1u64`, `8u64`],
+            inputs: [`1u64`, `${prize}000000u64`],
             fee: 150195,
             private: false
           });
 
-          const gameTransaction = Transaction.createTransaction(
+          const gameTransaction3 = Transaction.createTransaction(
             publicKey,
             WalletAdapterNetwork.TestnetBeta,
             'retro_beats_protocol_v2.aleo',
             'transfer_back',
-            [`1u64`, `8u64`],
+            [
+              '1u64',
+              `${prize}u64`
+            ],
             150195,
             false
           );
 
           console.log('Transaction created, requesting signature...');
-          const gameTx = await requestTransaction(gameTransaction);
+          const gameTx = await requestTransaction(gameTransaction3);
           console.log('Win transaction submitted:', gameTx);
         } catch (txError) {
           console.error('Transaction creation/execution failed:', txError);
@@ -1143,7 +1148,7 @@ export default function MidiPlayer() {
           <div className="bg-white p-4 rounded-lg shadow-md">
             <div className="flex items-center justify-between">
               <h3 className="text-lg font-semibold text-gray-800">Prize</h3>
-              <div className="text-2xl font-bold text-green-600">{prize}</div>
+              <div className="text-2xl font-bold text-green-600">{prize} ALEO</div>
             </div>
           </div>
 
