@@ -1,5 +1,5 @@
 import credits.aleo;
-program retro_beats_protocol_v0.aleo;
+program retro_beats_protocol_v2.aleo;
 
 mapping account:
     key as address.public;
@@ -11,20 +11,21 @@ mapping leaderboard:
 
 function transfer_back:
     input r0 as u64.public;
-    gt r0 0u64 into r1;
-    add 0u64 10000000u64 into r2;
-    add 0u64 0u64 into r3;
-    ternary r1 r2 r3 into r4;
-    call credits.aleo/transfer_public self.caller r4 into r5;
-    async transfer_back retro_beats_protocol_v0.aleo self.caller r4 r5 into r6;
-    output r6 as retro_beats_protocol_v0.aleo/transfer_back.future;
+    input r1 as u64.public;
+    gt r0 0u64 into r2;
+    add 0u64 r1 into r3;
+    add 0u64 0u64 into r4;
+    ternary r2 r3 r4 into r5;
+    call credits.aleo/transfer_public self.caller r5 into r6;
+    async transfer_back retro_beats_protocol_v2.aleo self.caller r5 r6 into r7;
+    output r7 as retro_beats_protocol_v2.aleo/transfer_back.future;
 
 finalize transfer_back:
     input r0 as address.public;
     input r1 as address.public;
     input r2 as u64.public;
     input r3 as credits.aleo/transfer_public.future;
-    is.eq r2 10000000u64 into r4;
+    gt r2 0u64 into r4;
     branch.eq r4 false to end_then_0_0;
     await r3;
     get.or_use leaderboard[r1] 0u64 into r5;

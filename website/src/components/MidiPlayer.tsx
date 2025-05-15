@@ -3,6 +3,9 @@
 import { useEffect, useRef, useState } from 'react';
 import { Synthetizer, Sequencer } from 'spessasynth_lib';
 import Fuse from 'fuse.js';
+import { useWallet } from '@demox-labs/aleo-wallet-adapter-react';
+import { WalletNotConnectedError } from '@demox-labs/aleo-wallet-adapter-base';
+import { Transaction, WalletAdapterNetwork } from '@demox-labs/aleo-wallet-adapter-base';
 
 interface Track {
   id: number;
@@ -125,6 +128,7 @@ export default function MidiPlayer() {
   const analyserRef = useRef<AnalyserNode | null>(null);
   const animationFrameRef = useRef<number>();
   const backgroundRef = useRef<HTMLDivElement>(null);
+  const { publicKey, requestTransaction, requestRecords } = useWallet();
 
   useEffect(() => {
     const initAudio = async () => {
@@ -782,108 +786,226 @@ export default function MidiPlayer() {
     }
   };
 
-  const handleMoreInstruments = () => {
-    if (!synthRef.current || tokenBalance <= 0) return;  // Add token balance check
+  const handleMoreInstruments = async () => {
+    if (!synthRef.current || tokenBalance <= 0) return;
 
-    console.log('Handling More Instruments click');
-    // Reduce token balance by 1 first, before unmuting any tracks
-    setTokenBalance(prev => Math.max(0, prev - 1));
-    // Reduce prize by 2
-    setPrize(prev => Math.max(0, prev - 2));
-    console.log('Token balance reduced by 1, Prize reduced by 2');
+    try {
+      if (!publicKey) throw new WalletNotConnectedError();
+      if (!requestTransaction) throw new Error('Transaction request not available');
 
-    setTracks(prevTracks => {
-      const newTracks = [...prevTracks];
-      
-      // Sort tracks by priority and current mute state
-      const sortedTracks = newTracks
-        .map((track, index) => ({ ...track, originalIndex: index }))
-        .sort((a, b) => {
-          if (a.isMuted !== b.isMuted) return a.isMuted ? -1 : 1;
-          return a.priority - b.priority;
-        });
+      // Create the transaction to decrement balance
+      const aleoTransaction = Transaction.createTransaction(
+        publicKey,
+        WalletAdapterNetwork.TestnetBeta,
+        'credits.aleo',
+        'transfer_public',
+        [
+          'aleo1uvfccnrvmh7qxglv6qm740dnaspxpkpw9m70ka3793yg0sn2xu9q7nvq6l',
+          '1000000u64'
+        ],
+        150195, // Fee,
+        false
+      );
 
-      // Find the next track to unmute
-      const nextTrackToUnmute = sortedTracks.find(track => track.isMuted);
-      
-      if (nextTrackToUnmute) {
-        console.log('Unmuting track:', nextTrackToUnmute.id);
-        // Unmute only one track
-        newTracks[nextTrackToUnmute.originalIndex].isMuted = false;
-        synthRef.current.muteChannel(nextTrackToUnmute.id, false);
-      } else {
-        console.log('No more tracks to unmute');
-      }
+      // Request the transaction
+      const txId = await requestTransaction(aleoTransaction);
+      console.log('Transaction submitted:', txId);
 
-      return newTracks;
-    });
+      // Only proceed with unmuting if transaction was successful
+      setTokenBalance(prev => Math.max(0, prev - 1));
+      setPrize(prev => Math.max(0, prev - 2));
+      console.log('Token balance reduced by 1, Prize reduced by 2');
+
+      setTracks(prevTracks => {
+        const newTracks = [...prevTracks];
+        
+        const sortedTracks = newTracks
+          .map((track, index) => ({ ...track, originalIndex: index }))
+          .sort((a, b) => {
+            if (a.isMuted !== b.isMuted) return a.isMuted ? -1 : 1;
+            return a.priority - b.priority;
+          });
+
+        const nextTrackToUnmute = sortedTracks.find(track => track.isMuted);
+        
+        if (nextTrackToUnmute) {
+          console.log('Unmuting track:', nextTrackToUnmute.id);
+          newTracks[nextTrackToUnmute.originalIndex].isMuted = false;
+          synthRef.current.muteChannel(nextTrackToUnmute.id, false);
+        } else {
+          console.log('No more tracks to unmute');
+        }
+
+        return newTracks;
+      });
+    } catch (error) {
+      console.error('Transaction failed:', error);
+      alert(`Transaction failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    }
   };
 
-  const handleGameSubmit = (e: React.FormEvent) => {
+  const handleGameSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!gameName.trim() || !currentFile) return;
     
-    // Get the MIDI filename without extension and clean it
-    const midiName = currentFile.replace(/\.midi?$/i, '').toLowerCase();
-    const inputName = gameName.trim().toLowerCase();
-    
-    // Get all variations of the input name
-    const inputVariations = getGameVariations(inputName);
-    console.log('Input variations:', inputVariations);
-    console.log('MIDI filename:', midiName);
+    try {
+      // Get the MIDI filename without extension and clean it
+      const midiName = currentFile.replace(/\.midi?$/i, '').toLowerCase();
+      const inputName = gameName.trim().toLowerCase();
+      
+      // Get all variations of the input name
+      const inputVariations = getGameVariations(inputName);
+      console.log('Input variations:', inputVariations);
+      console.log('MIDI filename:', midiName);
 
-    // First try exact matches
-    const hasExactMatch = inputVariations.some(variation => 
-      midiName.includes(variation) || variation.includes(midiName)
-    );
+      // First try exact matches
+      const hasExactMatch = inputVariations.some(variation => 
+        midiName.includes(variation) || variation.includes(midiName)
+      );
 
-    if (hasExactMatch) {
-      console.log('Found exact match!');
-      setGameResult("YOU WON! 🎉");
-      return;
-    }
+      if (hasExactMatch) {
+        console.log('Found exact match!');
+        setGameResult("YOU WON! 🎉");
 
-    // Configure Fuse for fuzzy matching
-    const fuse = new Fuse([midiName], {
-      includeScore: true,
-      threshold: 0.4, // Lower threshold means stricter matching
-      minMatchCharLength: 2,
-      distance: 50, // Increased to allow for more variations
-      ignoreLocation: true,
-    });
-    
-    // Try each variation with fuzzy matching
-    let bestScore = 1;
-    for (const variation of inputVariations) {
-      const result = fuse.search(variation);
-      if (result.length > 0 && result[0].score) {
-        console.log(`Matching '${variation}' against '${midiName}':`, result[0].score);
-        bestScore = Math.min(bestScore, result[0].score);
+        // If user won, initiate transaction to retro_beats_protocol
+        if (!publicKey) throw new WalletNotConnectedError();
+        if (!requestTransaction) throw new Error('Transaction request not available');
+
+        try {
+          console.log('Creating transaction with params:', {
+            publicKey: publicKey.toString(),
+            network: WalletAdapterNetwork.TestnetBeta,
+            program: 'retro_beats_protocol_v2.aleo',
+            function: 'transfer_back',
+            inputs: [`1u64`, `${prize}u64`],
+            fee: 150195,
+            private: false
+          });
+
+          const gameTransaction = Transaction.createTransaction(
+            publicKey,
+            WalletAdapterNetwork.TestnetBeta,
+            'retro_beats_protocol_v2.aleo',
+            'transfer_back',
+            [`1u64`, `${prize}u64`],
+            150195,
+            false
+          );
+
+          console.log('Transaction created, requesting signature...');
+          const gameTx = await requestTransaction(gameTransaction);
+          console.log('Win transaction submitted:', gameTx);
+        } catch (txError) {
+          console.error('Transaction creation/execution failed:', txError);
+          if (txError instanceof Error) {
+            console.error('Error details:', {
+              name: txError.name,
+              message: txError.message,
+              stack: txError.stack
+            });
+          }
+          throw txError;
+        }
+        return;
       }
-    }
-    
-    // Also try matching the other way around
-    const fuseReverse = new Fuse(inputVariations, {
-      includeScore: true,
-      threshold: 0.4,
-      minMatchCharLength: 2,
-      distance: 50,
-      ignoreLocation: true,
-    });
-    
-    const reverseResults = fuseReverse.search(midiName);
-    if (reverseResults.length > 0 && reverseResults[0].score) {
-      console.log('Reverse match score:', reverseResults[0].score);
-      bestScore = Math.min(bestScore, reverseResults[0].score);
-    }
 
-    console.log('Best match score:', bestScore);
-    const isMatch = bestScore < 0.4;
-    
-    setGameResult(isMatch ? "YOU WON! 🎉" : "YOU LOST :(");
-    console.log('Game name submitted:', gameName);
-    console.log('MIDI file:', midiName);
-    console.log('Result:', isMatch ? 'Win' : 'Loss');
+      // Configure Fuse for fuzzy matching
+      const fuse = new Fuse([midiName], {
+        includeScore: true,
+        threshold: 0.4,
+        minMatchCharLength: 2,
+        distance: 50,
+        ignoreLocation: true,
+      });
+      
+      // Try each variation with fuzzy matching
+      let bestScore = 1;
+      for (const variation of inputVariations) {
+        const result = fuse.search(variation);
+        if (result.length > 0 && result[0].score) {
+          console.log(`Matching '${variation}' against '${midiName}':`, result[0].score);
+          bestScore = Math.min(bestScore, result[0].score);
+        }
+      }
+      
+      // Also try matching the other way around
+      const fuseReverse = new Fuse(inputVariations, {
+        includeScore: true,
+        threshold: 0.4,
+        minMatchCharLength: 2,
+        distance: 50,
+        ignoreLocation: true,
+      });
+      
+      const reverseResults = fuseReverse.search(midiName);
+      if (reverseResults.length > 0 && reverseResults[0].score) {
+        console.log('Reverse match score:', reverseResults[0].score);
+        bestScore = Math.min(bestScore, reverseResults[0].score);
+      }
+
+      console.log('Best match score:', bestScore);
+      const isMatch = bestScore < 0.4;
+      
+      if (isMatch) {
+        setGameResult("YOU WON! 🎉");
+        
+        // If user won with fuzzy match, also initiate transaction
+        if (!publicKey) throw new WalletNotConnectedError();
+        if (!requestTransaction) throw new Error('Transaction request not available');
+
+        try {
+          console.log('Creating transaction with params:', {
+            publicKey: publicKey.toString(),
+            network: WalletAdapterNetwork.TestnetBeta,
+            program: 'retro_beats_protocol_v2.aleo',
+            function: 'transfer_back',
+            inputs: [`1u64`, `8u64`],
+            fee: 150195,
+            private: false
+          });
+
+          const gameTransaction = Transaction.createTransaction(
+            publicKey,
+            WalletAdapterNetwork.TestnetBeta,
+            'retro_beats_protocol_v2.aleo',
+            'transfer_back',
+            [`1u64`, `8u64`],
+            150195,
+            false
+          );
+
+          console.log('Transaction created, requesting signature...');
+          const gameTx = await requestTransaction(gameTransaction);
+          console.log('Win transaction submitted:', gameTx);
+        } catch (txError) {
+          console.error('Transaction creation/execution failed:', txError);
+          if (txError instanceof Error) {
+            console.error('Error details:', {
+              name: txError.name,
+              message: txError.message,
+              stack: txError.stack
+            });
+          }
+          throw txError;
+        }
+      } else {
+        setGameResult("YOU LOST :(");
+      }
+
+      console.log('Game name submitted:', gameName);
+      console.log('MIDI file:', midiName);
+      console.log('Result:', isMatch ? 'Win' : 'Loss');
+    } catch (error) {
+      console.error('Transaction failed:', error);
+      if (error instanceof Error) {
+        console.error('Error details:', {
+          name: error.name,
+          message: error.message,
+          stack: error.stack
+        });
+      }
+      alert(`Transaction failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    }
   };
 
   // Function to create disco colors based on audio level
@@ -1012,7 +1134,7 @@ export default function MidiPlayer() {
           {/* Token Balance Panel */}
           <div className="bg-white p-4 rounded-lg shadow-md">
             <div className="flex items-center justify-between">
-              <h3 className="text-lg font-semibold text-gray-800">Token Balance</h3>
+              <h3 className="text-lg font-semibold text-gray-800">Guesses Remaining</h3>
               <div className="text-2xl font-bold text-blue-600">{tokenBalance}</div>
             </div>
           </div>
